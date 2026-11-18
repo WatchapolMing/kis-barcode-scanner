@@ -16,11 +16,10 @@
     }
     h2 { margin: 0 0 12px 0; font-size: 1.2rem; color: #00e676; }
     
-    /* ปุ่มสลับโหมด Inbound / Outbound */
     .mode-switch {
       display: flex;
       max-width: 450px;
-      margin: 0 auto 12px auto;
+      margin: 0 auto 10px auto;
       background: #1e1e1e;
       border-radius: 10px;
       padding: 4px;
@@ -38,13 +37,25 @@
       cursor: pointer;
       transition: 0.2s;
     }
-    .mode-btn.active-inbound {
-      background: #00e676;
-      color: #000;
+    .mode-btn.active-inbound { background: #00e676; color: #000; }
+    .mode-btn.active-outbound { background: #2979ff; color: #fff; }
+
+    .photo-toggle {
+      max-width: 450px;
+      margin: 0 auto 10px auto;
+      background: #1e1e1e;
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid #333;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.95rem;
     }
-    .mode-btn.active-outbound {
-      background: #2979ff;
-      color: #fff;
+    .photo-toggle input[type="checkbox"] {
+      width: 20px;
+      height: 20px;
+      accent-color: #00e676;
     }
 
     #reader {
@@ -70,7 +81,7 @@
       display: flex;
       gap: 8px;
     }
-    input {
+    input[type="text"] {
       flex: 1;
       padding: 12px;
       font-size: 16px;
@@ -121,6 +132,12 @@
     }
     .badge.in { background: rgba(0, 230, 118, 0.2); color: #00e676; }
     .badge.out { background: rgba(41, 121, 255, 0.2); color: #64b5f6; }
+    .photo-link {
+      color: #ffd600;
+      text-decoration: none;
+      font-size: 0.85rem;
+      margin-left: 6px;
+    }
     .time { font-size: 0.8rem; color: #aaa; }
   </style>
 </head>
@@ -128,13 +145,16 @@
 
   <h2 id="headerTitle">📦 KIS Scanner (INBOUND)</h2>
 
-  <!-- ปุ่มเลือกโหมด Inbound / Outbound -->
   <div class="mode-switch">
     <button id="btnInbound" class="mode-btn active-inbound" onclick="setMode('Inbound')">📥 Inbound (รับเข้า)</button>
     <button id="btnOutbound" class="mode-btn" onclick="setMode('Outbound')">📤 Outbound (ส่งออก)</button>
   </div>
 
-  <!-- ช่อง Note เสริม (ค้างค่าไว้ให้ เผื่อยิงรวดเดียวหลายกล่องในรอบเดียวกัน) -->
+  <div class="photo-toggle">
+    <span>📸 ถ่ายรูปหน้ากล่องอัตโนมัติตอนยิง</span>
+    <input type="checkbox" id="autoPhoto" checked>
+  </div>
+
   <div class="input-group">
     <input type="text" id="noteInput" placeholder="Note (เช่น โกดัง Chiba, รอบเรือ 25/11)...">
   </div>
@@ -163,7 +183,7 @@
 
     function setMode(mode) {
       currentMode = mode;
-      lastScanned = ""; // รีเซ็ตกันซ้ำเผื่อสลับโหมดแล้วยิงกล่องเดิมทันที
+      lastScanned = "";
       
       const btnIn = document.getElementById('btnInbound');
       const btnOut = document.getElementById('btnOutbound');
@@ -208,6 +228,23 @@
       osc.stop(ctx.currentTime + 0.15);
     }
 
+    // ฟังก์ชันดึงภาพจากวิดีโอกล้องแล้วย่อขนาดเหลือความกว้าง 900px
+    function captureCompressedFrame() {
+      if (!document.getElementById('autoPhoto').checked) return null;
+      const video = document.querySelector('#reader video');
+      if (!video || video.videoWidth === 0) return null;
+
+      const maxWidth = 900;
+      const scale = Math.min(1, maxWidth / video.videoWidth);
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth * scale;
+      canvas.height = video.videoHeight * scale;
+
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL('image/jpeg', 0.72);
+    }
+
     function startCamera() {
       const startBtn = document.getElementById('startBtn');
       const readerEl = document.getElementById('reader');
@@ -246,10 +283,13 @@
       lastScanned = decodedText;
       lastScanTime = now;
 
+      // แคปภาพทันทีตอนสแกนติด (ก่อนที่คนถือกล้องจะขยับมือออก)
+      const imageBase64 = captureCompressedFrame();
+
       playBeep(true);
       if (navigator.vibrate) navigator.vibrate(100);
 
-      processTracking(decodedText);
+      processTracking(decodedText, imageBase64);
     }
 
     function submitManual() {
@@ -257,14 +297,17 @@
       const val = input.value.trim();
       if (!val) return;
       input.value = '';
-      processTracking(val);
+      // ถ้ากล้องเปิดอยู่และเปิดโหมดถ่ายรูปไว้ ก็แคปภาพให้ด้วยตอนกดบันทึก
+      const imageBase64 = captureCompressedFrame();
+      processTracking(val, imageBase64);
     }
 
-    async function processTracking(tracking) {
+    async function processTracking(tracking, imageBase64 = null) {
       const statusEl = document.getElementById('status');
       const noteVal = document.getElementById('noteInput').value.trim();
+      const photoText = imageBase64 ? ' + 📸 รูปภาพ' : '';
       
-      statusEl.innerHTML = `⏳ กำลังบันทึก [${currentMode}]: <b>${tracking}</b>...`;
+      statusEl.innerHTML = `⏳ กำลังบันทึก [${currentMode}${photoText}]: <b>${tracking}</b>...`;
       statusEl.style.color = '#ffd600';
 
       try {
@@ -274,7 +317,8 @@
           body: JSON.stringify({ 
             tracking: tracking,
             status: currentMode,
-            note: noteVal
+            note: noteVal,
+            image: imageBase64
           })
         });
         const res = await response.json();
@@ -287,7 +331,8 @@
             statusEl.style.color = '#ff9100';
           } else {
             const color = res.status === 'Inbound' ? '#00e676' : '#64b5f6';
-            statusEl.innerHTML = `✅ <b>บันทึก ${res.status}:</b> ${res.tracking}<br><small>${res.timestamp} ${res.note ? '| ' + res.note : ''}</small>`;
+            const imgBadge = res.imageUrl ? ' | 📸 บันทึกรูปแล้ว' : '';
+            statusEl.innerHTML = `✅ <b>บันทึก ${res.status}:</b> ${res.tracking}<br><small>${res.timestamp}${imgBadge}</small>`;
             statusEl.style.color = color;
           }
           addHistory(res);
@@ -305,10 +350,14 @@
       const list = document.getElementById('historyList');
       const div = document.createElement('div');
       const isOut = res.status === 'Outbound';
+      const photoLink = (res.imageUrl && res.imageUrl.startsWith('http')) 
+        ? `<a class="photo-link" href="${res.imageUrl}" target="_blank">🖼️ ดูรูป</a>` 
+        : '';
+
       div.className = 'history-item' + (isOut ? ' outbound' : '') + (res.isDuplicate ? ' dup' : '');
       div.innerHTML = `
         <div>
-          <strong>${res.tracking}</strong> <span class="badge ${isOut ? 'out' : 'in'}">${res.status}</span><br>
+          <strong>${res.tracking}</strong> <span class="badge ${isOut ? 'out' : 'in'}">${res.status}</span>${photoLink}<br>
           <span class="time">${res.timestamp} ${res.note ? '• ' + res.note : ''}</span>
         </div>
         <div>${res.isDuplicate ? '⚠️ ซ้ำ' : '✅'}</div>

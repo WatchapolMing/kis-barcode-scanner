@@ -15,6 +15,38 @@
       text-align: center;
     }
     h2 { margin: 0 0 12px 0; font-size: 1.2rem; color: #00e676; }
+    
+    /* ปุ่มสลับโหมด Inbound / Outbound */
+    .mode-switch {
+      display: flex;
+      max-width: 450px;
+      margin: 0 auto 12px auto;
+      background: #1e1e1e;
+      border-radius: 10px;
+      padding: 4px;
+      border: 1px solid #333;
+    }
+    .mode-btn {
+      flex: 1;
+      padding: 12px;
+      font-size: 1rem;
+      font-weight: bold;
+      border: none;
+      border-radius: 8px;
+      background: transparent;
+      color: #888;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+    .mode-btn.active-inbound {
+      background: #00e676;
+      color: #000;
+    }
+    .mode-btn.active-outbound {
+      background: #2979ff;
+      color: #fff;
+    }
+
     #reader {
       width: 100%;
       max-width: 450px;
@@ -25,15 +57,15 @@
       display: none;
     }
     .status-box {
-      margin: 16px auto;
+      margin: 14px auto;
       padding: 14px;
       max-width: 420px;
       border-radius: 10px;
       background: #1e1e1e;
       font-size: 1rem;
     }
-    .manual-input {
-      margin: 12px auto;
+    .input-group {
+      margin: 10px auto;
       max-width: 450px;
       display: flex;
       gap: 8px;
@@ -47,7 +79,7 @@
       background: #222;
       color: #fff;
     }
-    button {
+    .action-btn {
       padding: 12px 18px;
       font-size: 16px;
       font-weight: bold;
@@ -79,34 +111,89 @@
       align-items: center;
       border-left: 4px solid #00e676;
     }
+    .history-item.outbound { border-left-color: #2979ff; }
     .history-item.dup { border-left-color: #ff9100; }
+    .badge {
+      font-size: 0.75rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: bold;
+    }
+    .badge.in { background: rgba(0, 230, 118, 0.2); color: #00e676; }
+    .badge.out { background: rgba(41, 121, 255, 0.2); color: #64b5f6; }
     .time { font-size: 0.8rem; color: #aaa; }
   </style>
 </head>
 <body>
 
-  <h2>📦 KIS Inbound Scanner</h2>
+  <h2 id="headerTitle">📦 KIS Scanner (INBOUND)</h2>
+
+  <!-- ปุ่มเลือกโหมด Inbound / Outbound -->
+  <div class="mode-switch">
+    <button id="btnInbound" class="mode-btn active-inbound" onclick="setMode('Inbound')">📥 Inbound (รับเข้า)</button>
+    <button id="btnOutbound" class="mode-btn" onclick="setMode('Outbound')">📤 Outbound (ส่งออก)</button>
+  </div>
+
+  <!-- ช่อง Note เสริม (ค้างค่าไว้ให้ เผื่อยิงรวดเดียวหลายกล่องในรอบเดียวกัน) -->
+  <div class="input-group">
+    <input type="text" id="noteInput" placeholder="Note (เช่น โกดัง Chiba, รอบเรือ 25/11)...">
+  </div>
   
-  <button id="startBtn" onclick="startCamera()">📷 กดเพื่อเปิดกล้องสแกน</button>
+  <button id="startBtn" class="action-btn" onclick="startCamera()">📷 กดเพื่อเปิดกล้องสแกน</button>
   <div id="reader"></div>
 
-  <div class="status-box" id="status">กดปุ่มด้านบนเพื่อเปิดกล้อง หรือพิมพ์เลขด้านล่าง</div>
+  <div class="status-box" id="status">โหมดปัจจุบัน: <b>Inbound (รับเข้า)</b></div>
 
-  <div class="manual-input">
+  <div class="input-group">
     <input type="text" id="manualTracking" placeholder="หรือพิมพ์เลข Tracking..." onkeypress="if(event.key==='Enter') submitManual()">
-    <button onclick="submitManual()">บันทึก</button>
+    <button id="submitBtn" class="action-btn" onclick="submitManual()">บันทึก</button>
   </div>
 
   <div class="history" id="historyList"></div>
 
   <script>
     // ใส่ Web App URL ของ Google Apps Script ตรงนี้
-    const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwIQDhroRButPGIUw_XdTUE8Tk3feXLt8WIbJV-M_erhh55n_Johd9MkZHDz79hqE_p1Q/exec";
+    const GAS_WEB_APP_URL = "https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec";
 
+    let currentMode = 'Inbound';
     let isProcessing = false;
     let lastScanned = "";
     let lastScanTime = 0;
     const html5QrCode = new Html5Qrcode("reader");
+
+    function setMode(mode) {
+      currentMode = mode;
+      lastScanned = ""; // รีเซ็ตกันซ้ำเผื่อสลับโหมดแล้วยิงกล่องเดิมทันที
+      
+      const btnIn = document.getElementById('btnInbound');
+      const btnOut = document.getElementById('btnOutbound');
+      const header = document.getElementById('headerTitle');
+      const statusEl = document.getElementById('status');
+      const startBtn = document.getElementById('startBtn');
+      const submitBtn = document.getElementById('submitBtn');
+
+      if (mode === 'Inbound') {
+        btnIn.className = 'mode-btn active-inbound';
+        btnOut.className = 'mode-btn';
+        header.innerText = '📦 KIS Scanner (INBOUND)';
+        header.style.color = '#00e676';
+        startBtn.style.background = '#00e676';
+        startBtn.style.color = '#000';
+        submitBtn.style.background = '#00e676';
+        submitBtn.style.color = '#000';
+        statusEl.innerHTML = 'โหมดปัจจุบัน: <b style="color:#00e676;">Inbound (รับเข้า)</b>';
+      } else {
+        btnIn.className = 'mode-btn';
+        btnOut.className = 'mode-btn active-outbound';
+        header.innerText = '🚚 KIS Scanner (OUTBOUND)';
+        header.style.color = '#64b5f6';
+        startBtn.style.background = '#2979ff';
+        startBtn.style.color = '#fff';
+        submitBtn.style.background = '#2979ff';
+        submitBtn.style.color = '#fff';
+        statusEl.innerHTML = 'โหมดปัจจุบัน: <b style="color:#64b5f6;">Outbound (ส่งออก)</b>';
+      }
+    }
 
     function playBeep(isSuccess = true) {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -139,7 +226,7 @@
         },
         onScanSuccess
       ).then(() => {
-        statusEl.innerText = "พร้อมสแกนบาร์โค้ด...";
+        statusEl.innerHTML = `พร้อมสแกน (${currentMode})...`;
         statusEl.style.color = "#ffffff";
       }).catch(err => {
         startBtn.style.display = 'inline-block';
@@ -175,15 +262,20 @@
 
     async function processTracking(tracking) {
       const statusEl = document.getElementById('status');
-      statusEl.innerHTML = `⏳ กำลังบันทึก: <b>${tracking}</b>...`;
+      const noteVal = document.getElementById('noteInput').value.trim();
+      
+      statusEl.innerHTML = `⏳ กำลังบันทึก [${currentMode}]: <b>${tracking}</b>...`;
       statusEl.style.color = '#ffd600';
 
       try {
-        // ส่งแบบ text/plain เพื่อเลี่ยง CORS Preflight (OPTIONS) ของ Google Apps Script
         const response = await fetch(GAS_WEB_APP_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ tracking: tracking })
+          body: JSON.stringify({ 
+            tracking: tracking,
+            status: currentMode,
+            note: noteVal
+          })
         });
         const res = await response.json();
         isProcessing = false;
@@ -191,11 +283,12 @@
         if (res.success) {
           if (res.isDuplicate) {
             playBeep(false);
-            statusEl.innerHTML = `⚠️ <b>ยิงซ้ำ!</b> ${res.tracking} (${res.timestamp})`;
+            statusEl.innerHTML = `⚠️ <b>ยิงซ้ำ (${res.status})!</b> ${res.tracking}<br><small>${res.timestamp}</small>`;
             statusEl.style.color = '#ff9100';
           } else {
-            statusEl.innerHTML = `✅ <b>บันทึกแล้ว:</b> ${res.tracking}<br><small>${res.carrier} | ${res.timestamp}</small>`;
-            statusEl.style.color = '#00e676';
+            const color = res.status === 'Inbound' ? '#00e676' : '#64b5f6';
+            statusEl.innerHTML = `✅ <b>บันทึก ${res.status}:</b> ${res.tracking}<br><small>${res.timestamp} ${res.note ? '| ' + res.note : ''}</small>`;
+            statusEl.style.color = color;
           }
           addHistory(res);
         } else {
@@ -211,11 +304,12 @@
     function addHistory(res) {
       const list = document.getElementById('historyList');
       const div = document.createElement('div');
-      div.className = 'history-item' + (res.isDuplicate ? ' dup' : '');
+      const isOut = res.status === 'Outbound';
+      div.className = 'history-item' + (isOut ? ' outbound' : '') + (res.isDuplicate ? ' dup' : '');
       div.innerHTML = `
         <div>
-          <strong>${res.tracking}</strong> <small>(${res.carrier})</small><br>
-          <span class="time">${res.timestamp}</span>
+          <strong>${res.tracking}</strong> <span class="badge ${isOut ? 'out' : 'in'}">${res.status}</span><br>
+          <span class="time">${res.timestamp} ${res.note ? '• ' + res.note : ''}</span>
         </div>
         <div>${res.isDuplicate ? '⚠️ ซ้ำ' : '✅'}</div>
       `;

@@ -68,7 +68,7 @@
       display: none;
     }
     .status-box {
-      margin: 14px auto;
+      margin: 12px auto;
       padding: 14px;
       max-width: 420px;
       border-radius: 10px;
@@ -107,6 +107,27 @@
       padding: 14px;
       font-size: 1.05rem;
     }
+    /* ปุ่มถ่ายรูปเพิ่ม */
+    #extraPhotoBtn {
+      width: 100%;
+      max-width: 450px;
+      margin: 12px auto 0 auto;
+      padding: 14px;
+      font-size: 1.05rem;
+      font-weight: bold;
+      border: none;
+      border-radius: 10px;
+      background: #ffd600;
+      color: #000;
+      cursor: pointer;
+      display: none;
+    }
+    #extraPhotoBtn:disabled {
+      background: #555;
+      color: #999;
+      cursor: not-allowed;
+    }
+
     .history {
       max-width: 450px;
       margin: 16px auto;
@@ -124,6 +145,7 @@
     }
     .history-item.outbound { border-left-color: #2979ff; }
     .history-item.dup { border-left-color: #ff9100; }
+    .history-item.extra { border-left-color: #ffd600; }
     .badge {
       font-size: 0.75rem;
       padding: 2px 6px;
@@ -132,6 +154,7 @@
     }
     .badge.in { background: rgba(0, 230, 118, 0.2); color: #00e676; }
     .badge.out { background: rgba(41, 121, 255, 0.2); color: #64b5f6; }
+    .badge.extra { background: rgba(255, 214, 0, 0.2); color: #ffd600; }
     .photo-link {
       color: #ffd600;
       text-decoration: none;
@@ -151,8 +174,8 @@
   </div>
 
   <div class="photo-toggle">
-    <span>📸 ถ่ายรูปหน้ากล่องอัตโนมัติตอนยิง</span>
-    <input type="checkbox" id="autoPhoto" checked>
+    <span>📸 ถ่ายรูปอัตโนมัติทันทีที่ยิงบาร์โค้ด</span>
+    <input type="checkbox" id="autoPhoto">
   </div>
 
   <div class="input-group">
@@ -161,6 +184,9 @@
   
   <button id="startBtn" class="action-btn" onclick="startCamera()">📷 กดเพื่อเปิดกล้องสแกน</button>
   <div id="reader"></div>
+
+  <!-- ปุ่มกดถ่ายรูปเพิ่มเองแยกต่างหาก -->
+  <button id="extraPhotoBtn" onclick="takeExtraPhoto()">📸 ถ่ายรูปเพิ่มให้เลข: -</button>
 
   <div class="status-box" id="status">โหมดปัจจุบัน: <b>Inbound (รับเข้า)</b></div>
 
@@ -179,6 +205,8 @@
     let isProcessing = false;
     let lastScanned = "";
     let lastScanTime = 0;
+    let activeTrackingForPhoto = ""; // เก็บเลข Tracking ล่าสุดสำหรับกดถ่ายรูปเพิ่ม
+    let isCameraOpen = false;
     const html5QrCode = new Html5Qrcode("reader");
 
     function setMode(mode) {
@@ -228,9 +256,9 @@
       osc.stop(ctx.currentTime + 0.15);
     }
 
-    // ฟังก์ชันดึงภาพจากวิดีโอกล้องแล้วย่อขนาดเหลือความกว้าง 900px
-    function captureCompressedFrame() {
-      if (!document.getElementById('autoPhoto').checked) return null;
+    // forceCapture = true สำหรับปุ่มถ่ายรูปเพิ่ม (ถ่ายแม้จะปิดสวิตช์ถ่ายอัตโนมัติไว้)
+    function captureCompressedFrame(forceCapture = false) {
+      if (!forceCapture && !document.getElementById('autoPhoto').checked) return null;
       const video = document.querySelector('#reader video');
       if (!video || video.videoWidth === 0) return null;
 
@@ -263,14 +291,25 @@
         },
         onScanSuccess
       ).then(() => {
+        isCameraOpen = true;
         statusEl.innerHTML = `พร้อมสแกน (${currentMode})...`;
         statusEl.style.color = "#ffffff";
+        updateExtraPhotoButton();
       }).catch(err => {
+        isCameraOpen = false;
         startBtn.style.display = 'inline-block';
         readerEl.style.display = 'none';
         statusEl.innerText = "ไม่สามารถเปิดกล้องได้: " + err;
         statusEl.style.color = "#ff5252";
       });
+    }
+
+    function updateExtraPhotoButton() {
+      const btn = document.getElementById('extraPhotoBtn');
+      if (isCameraOpen && activeTrackingForPhoto) {
+        btn.style.display = 'block';
+        btn.innerText = `📸 ถ่ายรูปเพิ่มให้เลข: ${activeTrackingForPhoto}`;
+      }
     }
 
     function onScanSuccess(decodedText) {
@@ -283,13 +322,12 @@
       lastScanned = decodedText;
       lastScanTime = now;
 
-      // แคปภาพทันทีตอนสแกนติด (ก่อนที่คนถือกล้องจะขยับมือออก)
-      const imageBase64 = captureCompressedFrame();
+      const imageBase64 = captureCompressedFrame(false);
 
       playBeep(true);
       if (navigator.vibrate) navigator.vibrate(100);
 
-      processTracking(decodedText, imageBase64);
+      processTracking(decodedText, imageBase64, false);
     }
 
     function submitManual() {
@@ -297,18 +335,40 @@
       const val = input.value.trim();
       if (!val) return;
       input.value = '';
-      // ถ้ากล้องเปิดอยู่และเปิดโหมดถ่ายรูปไว้ ก็แคปภาพให้ด้วยตอนกดบันทึก
-      const imageBase64 = captureCompressedFrame();
-      processTracking(val, imageBase64);
+      const imageBase64 = captureCompressedFrame(false);
+      processTracking(val, imageBase64, false);
     }
 
-    async function processTracking(tracking, imageBase64 = null) {
-      const statusEl = document.getElementById('status');
-      const noteVal = document.getElementById('noteInput').value.trim();
-      const photoText = imageBase64 ? ' + 📸 รูปภาพ' : '';
+    function takeExtraPhoto() {
+      if (isProcessing || !activeTrackingForPhoto) return;
       
-      statusEl.innerHTML = `⏳ กำลังบันทึก [${currentMode}${photoText}]: <b>${tracking}</b>...`;
-      statusEl.style.color = '#ffd600';
+      const imageBase64 = captureCompressedFrame(true);
+      if (!imageBase64) {
+        alert("กรุณาเปิดกล้องก่อนกดถ่ายรูปเพิ่ม");
+        return;
+      }
+
+      isProcessing = true;
+      playBeep(true);
+      if (navigator.vibrate) navigator.vibrate(80);
+
+      processTracking(activeTrackingForPhoto, imageBase64, true);
+    }
+
+    async function processTracking(tracking, imageBase64 = null, isExtraPhoto = false) {
+      const statusEl = document.getElementById('status');
+      const extraBtn = document.getElementById('extraPhotoBtn');
+      const noteVal = document.getElementById('noteInput').value.trim();
+      
+      extraBtn.disabled = true;
+      if (isExtraPhoto) {
+        statusEl.innerHTML = `📸 กำลังอัปโหลดรูปเพิ่มเติมของ: <b>${tracking}</b>...`;
+        statusEl.style.color = '#ffd600';
+      } else {
+        const photoText = imageBase64 ? ' + 📸 รูปภาพ' : '';
+        statusEl.innerHTML = `⏳ กำลังบันทึก [${currentMode}${photoText}]: <b>${tracking}</b>...`;
+        statusEl.style.color = '#ffd600';
+      }
 
       try {
         const response = await fetch(GAS_WEB_APP_URL, {
@@ -318,14 +378,23 @@
             tracking: tracking,
             status: currentMode,
             note: noteVal,
-            image: imageBase64
+            image: imageBase64,
+            isExtraPhoto: isExtraPhoto
           })
         });
         const res = await response.json();
         isProcessing = false;
+        extraBtn.disabled = false;
 
         if (res.success) {
-          if (res.isDuplicate) {
+          // อัปเดตเลข Tracking ล่าสุดเพื่อให้ปุ่มถ่ายรูปเพิ่มพร้อมใช้งาน
+          activeTrackingForPhoto = res.tracking;
+          updateExtraPhotoButton();
+
+          if (res.isExtraPhoto) {
+            statusEl.innerHTML = `📸 <b>บันทึกรูปเพิ่มเติมแล้ว:</b> ${res.tracking}<br><small>${res.timestamp}</small>`;
+            statusEl.style.color = '#ffd600';
+          } else if (res.isDuplicate) {
             playBeep(false);
             statusEl.innerHTML = `⚠️ <b>ยิงซ้ำ (${res.status})!</b> ${res.tracking}<br><small>${res.timestamp}</small>`;
             statusEl.style.color = '#ff9100';
@@ -341,6 +410,7 @@
         }
       } catch (err) {
         isProcessing = false;
+        extraBtn.disabled = false;
         statusEl.innerHTML = `❌ เกิดข้อผิดพลาด: ${err.message}`;
         statusEl.style.color = '#ff5252';
       }
@@ -354,13 +424,19 @@
         ? `<a class="photo-link" href="${res.imageUrl}" target="_blank">🖼️ ดูรูป</a>` 
         : '';
 
-      div.className = 'history-item' + (isOut ? ' outbound' : '') + (res.isDuplicate ? ' dup' : '');
+      let itemClass = 'history-item' + (isOut ? ' outbound' : '');
+      if (res.isExtraPhoto) itemClass += ' extra';
+      else if (res.isDuplicate) itemClass += ' dup';
+
+      const extraBadge = res.isExtraPhoto ? ` <span class="badge extra">+รูปเพิ่ม</span>` : '';
+
+      div.className = itemClass;
       div.innerHTML = `
         <div>
-          <strong>${res.tracking}</strong> <span class="badge ${isOut ? 'out' : 'in'}">${res.status}</span>${photoLink}<br>
+          <strong>${res.tracking}</strong> <span class="badge ${isOut ? 'out' : 'in'}">${res.status}</span>${extraBadge}${photoLink}<br>
           <span class="time">${res.timestamp} ${res.note ? '• ' + res.note : ''}</span>
         </div>
-        <div>${res.isDuplicate ? '⚠️ ซ้ำ' : '✅'}</div>
+        <div>${res.isExtraPhoto ? '📸' : (res.isDuplicate ? '⚠️ ซ้ำ' : '✅')}</div>
       `;
       list.prepend(div);
     }

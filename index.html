@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>KIS Warehouse - Barcode Scanner</title>
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #121212;
+      color: #ffffff;
+      margin: 0;
+      padding: 16px;
+      text-align: center;
+    }
+    h2 { margin: 0 0 12px 0; font-size: 1.2rem; color: #00e676; }
+    #reader {
+      width: 100%;
+      max-width: 450px;
+      margin: 0 auto;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 2px solid #333;
+      display: none;
+    }
+    .status-box {
+      margin: 16px auto;
+      padding: 14px;
+      max-width: 420px;
+      border-radius: 10px;
+      background: #1e1e1e;
+      font-size: 1rem;
+    }
+    .manual-input {
+      margin: 12px auto;
+      max-width: 450px;
+      display: flex;
+      gap: 8px;
+    }
+    input {
+      flex: 1;
+      padding: 12px;
+      font-size: 16px;
+      border-radius: 8px;
+      border: 1px solid #444;
+      background: #222;
+      color: #fff;
+    }
+    button {
+      padding: 12px 18px;
+      font-size: 16px;
+      font-weight: bold;
+      border: none;
+      border-radius: 8px;
+      background: #00e676;
+      color: #000;
+      cursor: pointer;
+    }
+    #startBtn {
+      width: 100%;
+      max-width: 450px;
+      margin-bottom: 12px;
+      padding: 14px;
+      font-size: 1.05rem;
+    }
+    .history {
+      max-width: 450px;
+      margin: 16px auto;
+      text-align: left;
+    }
+    .history-item {
+      background: #1e1e1e;
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-left: 4px solid #00e676;
+    }
+    .history-item.dup { border-left-color: #ff9100; }
+    .time { font-size: 0.8rem; color: #aaa; }
+  </style>
+</head>
+<body>
+
+  <h2>📦 KIS Inbound Scanner</h2>
+  
+  <button id="startBtn" onclick="startCamera()">📷 กดเพื่อเปิดกล้องสแกน</button>
+  <div id="reader"></div>
+
+  <div class="status-box" id="status">กดปุ่มด้านบนเพื่อเปิดกล้อง หรือพิมพ์เลขด้านล่าง</div>
+
+  <div class="manual-input">
+    <input type="text" id="manualTracking" placeholder="หรือพิมพ์เลข Tracking..." onkeypress="if(event.key==='Enter') submitManual()">
+    <button onclick="submitManual()">บันทึก</button>
+  </div>
+
+  <div class="history" id="historyList"></div>
+
+  <script>
+    // ใส่ Web App URL ของ Google Apps Script ตรงนี้
+    const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwIQDhroRButPGIUw_XdTUE8Tk3feXLt8WIbJV-M_erhh55n_Johd9MkZHDz79hqE_p1Q/exec";
+
+    let isProcessing = false;
+    let lastScanned = "";
+    let lastScanTime = 0;
+    const html5QrCode = new Html5Qrcode("reader");
+
+    function playBeep(isSuccess = true) {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = isSuccess ? 'sine' : 'sawtooth';
+      osc.frequency.setValueAtTime(isSuccess ? 1000 : 300, ctx.currentTime);
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.15);
+    }
+
+    function startCamera() {
+      const startBtn = document.getElementById('startBtn');
+      const readerEl = document.getElementById('reader');
+      const statusEl = document.getElementById('status');
+
+      startBtn.style.display = 'none';
+      readerEl.style.display = 'block';
+      statusEl.innerText = "กำลังเปิดกล้อง...";
+
+      html5QrCode.start(
+        { facingMode: "environment" },
+        {
+          fps: 15,
+          qrbox: { width: 280, height: 140 },
+          aspectRatio: 1.5
+        },
+        onScanSuccess
+      ).then(() => {
+        statusEl.innerText = "พร้อมสแกนบาร์โค้ด...";
+        statusEl.style.color = "#ffffff";
+      }).catch(err => {
+        startBtn.style.display = 'inline-block';
+        readerEl.style.display = 'none';
+        statusEl.innerText = "ไม่สามารถเปิดกล้องได้: " + err;
+        statusEl.style.color = "#ff5252";
+      });
+    }
+
+    function onScanSuccess(decodedText) {
+      const now = Date.now();
+      if (isProcessing || (decodedText === lastScanned && now - lastScanTime < 3000)) {
+        return;
+      }
+
+      isProcessing = true;
+      lastScanned = decodedText;
+      lastScanTime = now;
+
+      playBeep(true);
+      if (navigator.vibrate) navigator.vibrate(100);
+
+      processTracking(decodedText);
+    }
+
+    function submitManual() {
+      const input = document.getElementById('manualTracking');
+      const val = input.value.trim();
+      if (!val) return;
+      input.value = '';
+      processTracking(val);
+    }
+
+    async function processTracking(tracking) {
+      const statusEl = document.getElementById('status');
+      statusEl.innerHTML = `⏳ กำลังบันทึก: <b>${tracking}</b>...`;
+      statusEl.style.color = '#ffd600';
+
+      try {
+        // ส่งแบบ text/plain เพื่อเลี่ยง CORS Preflight (OPTIONS) ของ Google Apps Script
+        const response = await fetch(GAS_WEB_APP_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ tracking: tracking })
+        });
+        const res = await response.json();
+        isProcessing = false;
+
+        if (res.success) {
+          if (res.isDuplicate) {
+            playBeep(false);
+            statusEl.innerHTML = `⚠️ <b>ยิงซ้ำ!</b> ${res.tracking} (${res.timestamp})`;
+            statusEl.style.color = '#ff9100';
+          } else {
+            statusEl.innerHTML = `✅ <b>บันทึกแล้ว:</b> ${res.tracking}<br><small>${res.carrier} | ${res.timestamp}</small>`;
+            statusEl.style.color = '#00e676';
+          }
+          addHistory(res);
+        } else {
+          throw new Error(res.error || 'Unknown error');
+        }
+      } catch (err) {
+        isProcessing = false;
+        statusEl.innerHTML = `❌ เกิดข้อผิดพลาด: ${err.message}`;
+        statusEl.style.color = '#ff5252';
+      }
+    }
+
+    function addHistory(res) {
+      const list = document.getElementById('historyList');
+      const div = document.createElement('div');
+      div.className = 'history-item' + (res.isDuplicate ? ' dup' : '');
+      div.innerHTML = `
+        <div>
+          <strong>${res.tracking}</strong> <small>(${res.carrier})</small><br>
+          <span class="time">${res.timestamp}</span>
+        </div>
+        <div>${res.isDuplicate ? '⚠️ ซ้ำ' : '✅'}</div>
+      `;
+      list.prepend(div);
+    }
+  </script>
+</body>
+</html>

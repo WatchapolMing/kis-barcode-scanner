@@ -107,7 +107,6 @@
       padding: 14px;
       font-size: 1.05rem;
     }
-    /* ปุ่มถ่ายรูปเพิ่ม */
     #extraPhotoBtn {
       width: 100%;
       max-width: 450px;
@@ -185,7 +184,6 @@
   <button id="startBtn" class="action-btn" onclick="startCamera()">📷 กดเพื่อเปิดกล้องสแกน</button>
   <div id="reader"></div>
 
-  <!-- ปุ่มกดถ่ายรูปเพิ่มเองแยกต่างหาก -->
   <button id="extraPhotoBtn" onclick="takeExtraPhoto()">📸 ถ่ายรูปเพิ่มให้เลข: -</button>
 
   <div class="status-box" id="status">โหมดปัจจุบัน: <b>Inbound (รับเข้า)</b></div>
@@ -198,14 +196,13 @@
   <div class="history" id="historyList"></div>
 
   <script>
-    // ใส่ Web App URL ของ Google Apps Script ตรงนี้
     const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwIQDhroRButPGIUw_XdTUE8Tk3feXLt8WIbJV-M_erhh55n_Johd9MkZHDz79hqE_p1Q/exec";
 
     let currentMode = 'Inbound';
     let isProcessing = false;
     let lastScanned = "";
     let lastScanTime = 0;
-    let activeTrackingForPhoto = ""; // เก็บเลข Tracking ล่าสุดสำหรับกดถ่ายรูปเพิ่ม
+    let activeTrackingForPhoto = "";
     let isCameraOpen = false;
     const html5QrCode = new Html5Qrcode("reader");
 
@@ -256,21 +253,23 @@
       osc.stop(ctx.currentTime + 0.15);
     }
 
-    // forceCapture = true สำหรับปุ่มถ่ายรูปเพิ่ม (ถ่ายแม้จะปิดสวิตช์ถ่ายอัตโนมัติไว้)
     function captureCompressedFrame(forceCapture = false) {
       if (!forceCapture && !document.getElementById('autoPhoto').checked) return null;
       const video = document.querySelector('#reader video');
       if (!video || video.videoWidth === 0) return null;
 
-      const maxWidth = 900;
+      // ความกว้าง 1150px คุณภาพ 0.78 (สมดุลระหว่างความคมชัดและขนาดไฟล์)
+      const maxWidth = 1150;
       const scale = Math.min(1, maxWidth / video.videoWidth);
       const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth * scale;
-      canvas.height = video.videoHeight * scale;
+      canvas.width = Math.round(video.videoWidth * scale);
+      canvas.height = Math.round(video.videoHeight * scale);
 
       const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      return canvas.toDataURL('image/jpeg', 0.72);
+      return canvas.toDataURL('image/jpeg', 0.78);
     }
 
     function startCamera() {
@@ -282,13 +281,22 @@
       readerEl.style.display = 'block';
       statusEl.innerText = "กำลังเปิดกล้อง...";
 
+      // ขอความละเอียดระดับ HD (1280x720) เพื่อให้กล้องโฟกัสชัดขึ้นแต่ไม่กินทรัพยากร
+      const scanConfig = {
+        fps: 15,
+        qrbox: { width: 280, height: 140 },
+        aspectRatio: 1.5,
+        videoConstraints: {
+          facingMode: "environment",
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          focusMode: "continuous"
+        }
+      };
+
       html5QrCode.start(
         { facingMode: "environment" },
-        {
-          fps: 15,
-          qrbox: { width: 280, height: 140 },
-          aspectRatio: 1.5
-        },
+        scanConfig,
         onScanSuccess
       ).then(() => {
         isCameraOpen = true;
@@ -296,11 +304,22 @@
         statusEl.style.color = "#ffffff";
         updateExtraPhotoButton();
       }).catch(err => {
-        isCameraOpen = false;
-        startBtn.style.display = 'inline-block';
-        readerEl.style.display = 'none';
-        statusEl.innerText = "ไม่สามารถเปิดกล้องได้: " + err;
-        statusEl.style.color = "#ff5252";
+        html5QrCode.start(
+          { facingMode: "environment" },
+          { fps: 15, qrbox: { width: 280, height: 140 }, aspectRatio: 1.5 },
+          onScanSuccess
+        ).then(() => {
+          isCameraOpen = true;
+          statusEl.innerHTML = `พร้อมสแกน (${currentMode})...`;
+          statusEl.style.color = "#ffffff";
+          updateExtraPhotoButton();
+        }).catch(fallbackErr => {
+          isCameraOpen = false;
+          startBtn.style.display = 'inline-block';
+          readerEl.style.display = 'none';
+          statusEl.innerText = "ไม่สามารถเปิดกล้องได้: " + fallbackErr;
+          statusEl.style.color = "#ff5252";
+        });
       });
     }
 
@@ -387,7 +406,6 @@
         extraBtn.disabled = false;
 
         if (res.success) {
-          // อัปเดตเลข Tracking ล่าสุดเพื่อให้ปุ่มถ่ายรูปเพิ่มพร้อมใช้งาน
           activeTrackingForPhoto = res.tracking;
           updateExtraPhotoButton();
 
